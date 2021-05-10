@@ -3,13 +3,22 @@ use super::{super::ceil8, HybridEncoded};
 
 /// An iterator that, given a slice of bytes, returns `HybridEncoded`
 pub struct Decoder<'a> {
+    /// compressed values, compression method and length of the run is encoded in initial bytes
     values: &'a [u8],
+    /// bit width of encoded values if using bitpacking
     num_bits: u32,
+    /// remaining number of items, updated only once per compressed run
+    /// since this iterator returns HybridEncoded runs this value can not be returned in size_hint
+    remaining: usize,
 }
 
 impl<'a> Decoder<'a> {
-    pub fn new(values: &'a [u8], num_bits: u32) -> Self {
-        Self { values, num_bits }
+    pub fn new(values: &'a [u8], num_bits: u32, length: usize) -> Self {
+        Self {
+            values,
+            num_bits,
+            remaining: length,
+        }
     }
 }
 
@@ -24,17 +33,34 @@ impl<'a> Iterator for Decoder<'a> {
         self.values = &self.values[consumed..];
         if indicator & 1 == 1 {
             // is bitpacking
-            let bytes = (indicator as usize >> 1) * self.num_bits as usize;
-            let result = Some(HybridEncoded::Bitpacked(&self.values[..bytes]));
-            self.values = &self.values[bytes..];
+            let num_bits = self.num_bits as usize;
+            let num_bytes = (indicator as usize >> 1) * num_bits;
+            let length = (indicator as usize >> 1) * 8;
+            let run_length = std::cmp::min(length, self.remaining);
+            let result = Some(HybridEncoded::Bitpacked {
+                compressed: &self.values[..num_bytes],
+                num_bits,
+                run_length,
+            });
+            self.remaining -= run_length;
+            self.values = &self.values[num_bytes..];
             result
         } else {
             // is rle
             let run_length = indicator as usize >> 1;
             // repeated-value := value that is repeated, using a fixed-width of round-up-to-next-byte(bit-width)
             let rle_bytes = ceil8(self.num_bits as usize);
-            let result = Some(HybridEncoded::Rle(&self.values[..rle_bytes], run_length));
+
+            let pack = &self.values[0..rle_bytes];
+            let mut value_bytes = [0u8; std::mem::size_of::<u32>()];
+            pack.iter()
+                .enumerate()
+                .for_each(|(i, byte)| value_bytes[i] = *byte);
+            let value = u32::from_le_bytes(value_bytes);
+
+            let result = Some(HybridEncoded::Rle { value, run_length });
             self.values = &self.values[rle_bytes..];
+            self.remaining -= run_length;
             result
         }
     }
@@ -44,8 +70,6 @@ impl<'a> Iterator for Decoder<'a> {
 mod tests {
     use super::*;
 
-    use super::super::super::bitpacking;
-
     #[test]
     fn basics_1() {
         let bit_width = 1;
@@ -54,19 +78,13 @@ mod tests {
             2, 0, 0, 0, // length
             0b00000011, 0b00001011, // data
         ];
+        let expected = vec![1, 1, 0, 1, 0];
 
-        let mut decoder = Decoder::new(&values[4..6], bit_width);
+        let decoder = Decoder::new(&values[4..6], bit_width, length);
 
-        let run = decoder.next().unwrap();
+        let result = decoder.flatten().collect::<Vec<_>>();
 
-        if let HybridEncoded::Bitpacked(values) = run {
-            assert_eq!(values, &[0b00001011]);
-            let result =
-                bitpacking::Decoder::new(values, bit_width as u8, length).collect::<Vec<_>>();
-            assert_eq!(result, &[1, 1, 0, 1, 0]);
-        } else {
-            panic!()
-        };
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -74,23 +92,18 @@ mod tests {
         // This test was validated by the result of what pyarrow3 outputs when
         // the bitmap is used.
         let bit_width = 1;
+        let length = 10;
         let values = vec![
             3, 0, 0, 0, // length
             0b00000101, 0b11101011, 0b00000010, // data
         ];
-        let expected = &[1, 1, 0, 1, 0, 1, 1, 1, 0, 1];
+        let expected = vec![1, 1, 0, 1, 0, 1, 1, 1, 0, 1];
 
-        let mut decoder = Decoder::new(&values[4..4 + 3], bit_width);
+        let decoder = Decoder::new(&values[4..4 + 3], bit_width, length);
 
-        let run = decoder.next().unwrap();
+        let result = decoder.flatten().collect::<Vec<_>>();
 
-        if let HybridEncoded::Bitpacked(values) = run {
-            assert_eq!(values, &[0b11101011, 0b00000010]);
-            let result = bitpacking::Decoder::new(values, bit_width as u8, 10).collect::<Vec<_>>();
-            assert_eq!(result, expected);
-        } else {
-            panic!()
-        };
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -102,16 +115,30 @@ mod tests {
             0b00010000, // data
             0b00000001,
         ];
+        let expected = vec![1_u32; length];
 
-        let mut decoder = Decoder::new(&values[4..4 + 2], bit_width);
+        let decoder = Decoder::new(&values[4..4 + 2], bit_width, length);
 
-        let run = decoder.next().unwrap();
+        let result = decoder.flatten().collect::<Vec<_>>();
 
-        if let HybridEncoded::Rle(values, items) = run {
-            assert_eq!(values, &[0b00000001]);
-            assert_eq!(items, length);
-        } else {
-            panic!()
-        };
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn rle_and_bit_packed() {
+        let bit_width = 1;
+        let length = 8;
+        let values = vec![
+            4, 0, 0, 0,          // length
+            0b00001000, // data
+            0b00000001, 0b00000011, 0b00001010,
+        ];
+        let expected = vec![1, 1, 1, 1, 0, 1, 0, 1];
+
+        let decoder = Decoder::new(&values[4..4 + 4], bit_width, length);
+
+        let result = decoder.flatten().collect::<Vec<_>>();
+
+        assert_eq!(result, expected);
     }
 }

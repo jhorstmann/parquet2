@@ -44,28 +44,25 @@ pub fn decode(values: &[u8], length: u32, encoding: (&Encoding, i16)) -> Vec<u32
 #[inline]
 pub fn rle_decode(values: &[u8], num_bits: u32, length: u32) -> Vec<u32> {
     let length = length as usize;
-    let runner = hybrid_rle::Decoder::new(&values, num_bits);
+    let runner = hybrid_rle::Decoder::new(&values, num_bits, length as usize);
 
     let mut values = Vec::with_capacity(length);
     runner.for_each(|run| match run {
-        hybrid_rle::HybridEncoded::Bitpacked(compressed) => {
+        hybrid_rle::HybridEncoded::Bitpacked {
+            compressed,
+            num_bits,
+            run_length,
+        } => {
             let previous_len = values.len();
-            let pack_length = (compressed.len() as usize / num_bits as usize) * 8;
-            let additional = std::cmp::min(previous_len + pack_length, length - previous_len);
             values.extend(bitpacking::Decoder::new(
                 compressed,
                 num_bits as u8,
-                additional,
+                run_length,
             ));
-            debug_assert_eq!(previous_len + additional, values.len());
+            debug_assert_eq!(previous_len + run_length, values.len());
         }
-        hybrid_rle::HybridEncoded::Rle(pack, items) => {
-            let mut bytes = [0u8; std::mem::size_of::<u32>()];
-            pack.iter()
-                .enumerate()
-                .for_each(|(i, byte)| bytes[i] = *byte);
-            let value = u32::from_le_bytes(bytes);
-            values.extend(std::iter::repeat(value).take(items))
+        hybrid_rle::HybridEncoded::Rle { value, run_length } => {
+            values.extend(std::iter::repeat(value).take(run_length))
         }
     });
     values
@@ -82,5 +79,25 @@ pub fn consume_level<'a>(
         (&values[offset..], def_levels)
     } else {
         (values, vec![0; length as usize])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rle_decode() {
+        let bit_width = 1;
+        let length = 5;
+        let values = vec![
+            2, 0, 0, 0, // length
+            0b00000011, 0b00001011, // data
+        ];
+        let expected = vec![1, 1, 0, 1, 0];
+
+        let result = rle_decode(&values[4..], bit_width, length);
+
+        assert_eq!(result, expected);
     }
 }

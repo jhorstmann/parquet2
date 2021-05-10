@@ -6,7 +6,7 @@ use crate::metadata::ColumnDescriptor;
 use crate::read::Page;
 use crate::serialization::read::utils::ValuesDef;
 use crate::{
-    encoding::{bitpacking, plain_byte_array, uleb128},
+    encoding::{hybrid_rle, plain_byte_array},
     read::BinaryPageDict,
 };
 
@@ -19,24 +19,29 @@ fn read_dict_buffer(
     let dict_values = dict.values();
     let dict_offsets = dict.offsets();
 
-    let (values, _) = consume_level(values, length, def_level_encoding);
+    let (values, def_levels) = consume_level(values, length, def_level_encoding);
 
     let bit_width = values[0];
     let values = &values[1..];
 
-    let (_, consumed) = uleb128::decode(&values);
-    let values = &values[consumed..];
+    let indices = hybrid_rle::Decoder::new(values, bit_width as u32, length as usize);
 
-    let indices = bitpacking::Decoder::new(values, bit_width, length as usize);
-
-    indices
-        .map(|id| {
+    let decoded_values = indices.flat_map(|hybrid| {
+        hybrid.into_iter().map(|id| {
             let id = id as usize;
             let start = dict_offsets[id] as usize;
             let end = dict_offsets[id + 1] as usize;
-            Some(dict_values[start..end].to_vec())
+
+            dict_values[start..end].to_vec()
         })
-        .collect()
+    });
+
+    ValuesDef::new(
+        decoded_values,
+        def_levels.into_iter(),
+        def_level_encoding.1 as u32,
+    )
+    .collect()
 }
 
 pub fn page_dict_to_vec(
