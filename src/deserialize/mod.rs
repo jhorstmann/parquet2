@@ -6,6 +6,7 @@ mod hybrid_rle;
 mod native;
 mod utils;
 
+#[expect(ambiguous_glob_reexports)]
 pub use binary::*;
 pub use boolean::*;
 pub use filtered_rle::*;
