@@ -1,4 +1,4 @@
-use crate::schema::types::{ParquetType, PrimitiveType};
+use crate::schema::types::PrimitiveType;
 #[cfg(feature = "serde_types")]
 use serde::{Deserialize, Serialize};
 
@@ -28,9 +28,6 @@ pub struct ColumnDescriptor {
 
     /// The path of this column. For instance, "a.b.c.d".
     pub path_in_schema: Vec<String>,
-
-    /// The [`ParquetType`] this descriptor is a leaf of
-    pub base_type: ParquetType,
 }
 
 impl ColumnDescriptor {
@@ -38,12 +35,10 @@ impl ColumnDescriptor {
     pub fn new(
         descriptor: Descriptor,
         path_in_schema: Vec<String>,
-        base_type: ParquetType,
     ) -> Self {
         Self {
             descriptor,
             path_in_schema,
-            base_type,
         }
     }
 }

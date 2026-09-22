@@ -1,5 +1,5 @@
 use std::io::Write;
-
+use std::sync::Arc;
 #[cfg(feature = "async")]
 use futures::AsyncWrite;
 
@@ -82,7 +82,7 @@ pub fn write_row_group<
 >(
     writer: &mut W,
     mut offset: u64,
-    descriptors: &[ColumnDescriptor],
+    descriptors: &[Arc<ColumnDescriptor>],
     columns: DynIter<'a, std::result::Result<DynStreamingIterator<'a, CompressedPage, E>, E>>,
     ordinal: usize,
 ) -> Result<(RowGroup, Vec<Vec<PageWriteSpec>>, u64)>
@@ -149,7 +149,7 @@ pub async fn write_row_group_async<
 >(
     writer: &mut W,
     mut offset: u64,
-    descriptors: &[ColumnDescriptor],
+    descriptors: &[Arc<ColumnDescriptor>],
     columns: DynIter<'a, std::result::Result<DynStreamingIterator<'a, CompressedPage, E>, E>>,
     ordinal: usize,
 ) -> Result<(RowGroup, Vec<Vec<PageWriteSpec>>, u64)>

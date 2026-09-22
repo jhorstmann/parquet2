@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use parquet_format_safe::SchemaElement;
 
 use crate::{
@@ -22,7 +23,7 @@ pub struct SchemaDescriptor {
 
     // All the descriptors for primitive columns in this schema, constructed from
     // `schema` in DFS order.
-    leaves: Vec<ColumnDescriptor>,
+    leaves: Vec<Arc<ColumnDescriptor>>,
 }
 
 impl SchemaDescriptor {
@@ -45,7 +46,7 @@ impl SchemaDescriptor {
     ///
     /// Note that, for nested fields, this may contain more entries than the number of fields
     /// in the file - e.g. a struct field may have two columns.
-    pub fn columns(&self) -> &[ColumnDescriptor] {
+    pub fn columns(&self) -> &[Arc<ColumnDescriptor>] {
         &self.leaves
     }
 
@@ -99,7 +100,7 @@ fn build_tree<'a>(
     base_tp: &ParquetType,
     mut max_rep_level: i16,
     mut max_def_level: i16,
-    leaves: &mut Vec<ColumnDescriptor>,
+    leaves: &mut Vec<Arc<ColumnDescriptor>>,
     path_so_far: &mut Vec<&'a str>,
 ) {
     path_so_far.push(tp.name());
@@ -117,15 +118,14 @@ fn build_tree<'a>(
     match tp {
         ParquetType::PrimitiveType(p) => {
             let path_in_schema = path_so_far.iter().copied().map(String::from).collect();
-            leaves.push(ColumnDescriptor::new(
+            leaves.push(Arc::new(ColumnDescriptor::new(
                 Descriptor {
                     primitive_type: p.clone(),
                     max_def_level,
                     max_rep_level,
                 },
                 path_in_schema,
-                base_tp.clone(),
-            ));
+            )));
         }
         ParquetType::GroupType { ref fields, .. } => {
             for f in fields {

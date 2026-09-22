@@ -36,7 +36,7 @@ pub struct ColumnChunkMetaData {
         serde(deserialize_with = "deserialize_column_chunk")
     )]
     column_chunk: ColumnChunk,
-    column_descr: ColumnDescriptor,
+    column_descr: Arc<ColumnDescriptor>,
 }
 
 #[cfg(feature = "serde_types")]
@@ -70,7 +70,7 @@ where
 // Represents common operations for a column chunk.
 impl ColumnChunkMetaData {
     /// Returns a new [`ColumnChunkMetaData`]
-    pub fn new(column_chunk: ColumnChunk, column_descr: ColumnDescriptor) -> Self {
+    pub fn new(column_chunk: ColumnChunk, column_descr: Arc<ColumnDescriptor>) -> Self {
         Self {
             column_chunk,
             column_descr,
@@ -179,7 +179,7 @@ impl ColumnChunkMetaData {
 
     /// Method to convert from Thrift.
     pub(crate) fn try_from_thrift(
-        column_descr: ColumnDescriptor,
+        column_descr: Arc<ColumnDescriptor>,
         column_chunk: ColumnChunk,
     ) -> Result<Self> {
         // validate metadata
